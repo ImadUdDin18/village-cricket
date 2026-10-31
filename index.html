@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Village Cricket Scorer</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu&display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:system-ui,sans-serif;background:#eef5f0;color:#0f2a1a}
+.w{max-width:560px;margin:auto;padding:12px}.card{background:#fff;border-radius:16px;padding:12px;margin:10px 0;box-shadow:0 1px 5px #0002}
+.hd{background:linear-gradient(135deg,#01411C,#0a6b2f);color:#fff;border-radius:18px;padding:16px;margin:10px 0}
+.btn{border:0;border-radius:12px;font-weight:700;font-size:16px;padding:12px;background:#ddd;cursor:pointer;color:#000;text-align:center;text-decoration:none;display:block}
+.g{background:#0a6b2f;color:#fff}.y{background:#f5c518}.r{background:#d32f2f;color:#fff}.k{background:#444;color:#fff}.b{background:#1565c0;color:#fff}.p{background:#7b1fa2;color:#fff}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.run{height:72px;font-size:34px}.big{height:60px;font-size:22px;line-height:36px}
+input,select,textarea{width:100%;box-sizing:border-box;font-size:16px;padding:10px;border:1px solid #bbb;border-radius:10px;margin:4px 0;background:#fff}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:4px;border-top:1px solid #eee;text-align:left}
+.score{color:#fff;border-radius:16px;padding:14px}.score .n{font-size:56px;font-weight:900}
+.chip{display:inline-flex;min-width:34px;height:34px;border-radius:17px;align-items:center;justify-content:center;color:#fff;background:#666;font-weight:700;margin:2px;padding:0 4px;font-size:14px}
+.ur{font-family:'Noto Nastaliq Urdu',serif;line-height:2}a{color:#0a6b2f}
+.modal{position:fixed;inset:0;background:#0009;display:flex;align-items:flex-end;justify-content:center;z-index:9}.modal>div{background:#fff;width:100%;max-width:560px;border-radius:20px 20px 0 0;padding:14px}
+.ov{position:fixed;left:0;right:0;bottom:0;padding:12px;color:#fff;font-family:system-ui}
+.ov .bar{border:3px solid #fff;border-radius:16px;overflow:hidden;background:linear-gradient(90deg,#01411Cf2,#0a6b2ff2);box-shadow:0 4px 20px #0008}
+.ov .row{display:flex}.ov .bg{font-size:56px;font-weight:900;line-height:1}
+</style></head><body><div id="app"></div>
+<script>
+const $=s=>document.querySelector(s),app=$('#app');
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const uid=()=>Math.random().toString(36).slice(2,10)+Date.now().toString(36);
+
+/* ---------- scoring engine ---------- */
+const legal=b=>b.extra_type!=='wide'&&b.extra_type!=='noball';
+const ran=b=>b.extra_type==='wide'?b.extra_runs-1:(b.extra_type==='bye'||b.extra_type==='legbye')?b.extra_runs:b.runs;
+const ovs=n=>Math.floor(n/6)+'.'+(n%6);
+const rr=(r,b)=>b?r*6/b:0;
+function replay(balls,bt){
+  let s=bt[0]?.id||null,n=bt[1]?.id||null,nx=2,r=0,w=0,lb=0;
+  for(const b of balls){
+    r+=b.runs+b.extra_runs;if(legal(b))lb++;
+    if(ran(b)%2)[s,n]=[n,s];
+    if(b.is_wicket&&b.out_batsman_id){w++;const x=bt[nx++]?.id||null;if(s===b.out_batsman_id)s=x;else if(n===b.out_batsman_id)n=x;}
+    if(legal(b)&&lb%6===0)[s,n]=[n,s];
+  }
+  return{runs:r,wickets:w,lb,s,n};
+}
+function buildBall(inn,st,bowler,i){
+  let runs=0,ex=0;
+  if(i.extra==='wide')ex=1+i.runs;else if(i.extra==='noball'){runs=i.runs;ex=1}else if(i.extra==='bye'||i.extra==='legbye')ex=i.runs;else runs=i.runs;
+  let w=i.wicket;
+  if(w&&i.extra==='noball'&&w.type!=='run out')w=null;
+  if(w&&i.extra==='wide'&&!['stumped','run out','hit wicket'].includes(w.type))w=null;
+  if(w&&(i.extra==='bye'||i.extra==='legbye')&&w.type!=='run out')w=null;
+  return{innings:inn,over_number:Math.floor(st.lb/6),batsman_id:st.s,non_striker_id:st.n,bowler_id:bowler,runs,extra_type:i.extra,extra_runs:ex,
+    is_wicket:!!w,wicket_type:w?w.type:null,out_batsman_id:w?w.outId:null,fielder_id:w?w.fielderId:null};
+}
+function batStats(balls,bt,nm){
+  const m=new Map();const g=id=>{if(!m.has(id))m.set(id,{id,runs:0,balls:0,f:0,s:0,out:false,how:'',batted:true});return m.get(id)};
+  for(const b of balls){
+    const x=g(b.batsman_id);g(b.non_striker_id);x.runs+=b.runs;if(b.extra_type!=='wide')x.balls++;if(b.runs===4)x.f++;if(b.runs===6)x.s++;
+    if(b.is_wicket&&b.out_batsman_id){const o=g(b.out_batsman_id),t=b.wicket_type;o.out=true;
+      o.how=t==='caught'?`c ${nm(b.fielder_id)} b ${nm(b.bowler_id)}`:t==='stumped'?`st ${nm(b.fielder_id)} b ${nm(b.bowler_id)}`:t==='run out'?'run out':`${t} b ${nm(b.bowler_id)}`;}
+  }
+  return bt.map(p=>m.get(p.id)||{id:p.id,runs:0,balls:0,f:0,s:0,out:false,how:'',batted:false});
+}
+function bowlStats(balls){
+  const m=new Map(),o=new Map();
+  for(const b of balls){
+    const x=m.get(b.bowler_id)||{id:b.bowler_id,b:0,md:0,r:0,w:0};const c=b.runs+((b.extra_type==='wide'||b.extra_type==='noball')?b.extra_runs:0);
+    x.r+=c;if(legal(b))x.b++;if(b.is_wicket&&b.wicket_type!=='run out')x.w++;m.set(b.bowler_id,x);
+    const k=b.bowler_id+':'+b.over_number,v=o.get(k)||{l:0,r:0};v.r+=c;if(legal(b))v.l++;o.set(k,v);
+  }
+  o.forEach((v,k)=>{if(v.l===6&&v.r===0)m.get(k.split(':')[0]).md++});
+  return[...m.values()];
+}
+const chipTxt=b=>b.is_wicket?'W':b.extra_type==='wide'?b.extra_runs+'wd':b.extra_type==='noball'?(b.runs+1)+'nb':b.extra_type==='bye'?b.extra_runs+'b':b.extra_type==='legbye'?b.extra_runs+'lb':String(b.runs);
+const chipCls=t=>t==='W'?'r':t==='4'?'b':t==='6'?'p':'';
+const over=(st,lim,size,target)=>st.wickets>=Math.max(1,size-1)||st.lb>=lim*6||(target!=null&&st.runs>=target);
+
+/* ---------- storage (this phone/browser) ---------- */
+const KEY='vc_matches';
+const getAll=()=>{try{return JSON.parse(localStorage.getItem(KEY))||[]}catch(e){return[]}};
+let M=null,view='',mode=null,bowlerSel='',wk=null,es=null,OV=null,pt=null;
+function save(){const a=getAll(),i=a.findIndex(x=>x.id===M.id);if(i<0)a.unshift(M);else a[i]=M;localStorage.setItem(KEY,JSON.stringify(a));publish()}
+function derive(){
+  const m=M;if(!m||!m.innings.length)return null;
+  const cur=[...m.innings].reverse().find(i=>!i.is_complete)||m.innings[m.innings.length-1];
+  const bt=m.players.filter(p=>p.team===cur.batting_team).sort((a,b)=>a.batting_order-b.batting_order),bw=m.players.filter(p=>p.team!==cur.batting_team);
+  const ib=m.balls.filter(b=>b.innings===cur.innings_number),st=replay(ib,bt),target=cur.innings_number===2?m.innings[0].total_runs+1:null,by=new Map(m.players.map(p=>[p.id,p]));
+  return{m,cur,bt,bw,balls:ib,st,target,by,nm:id=>id?(by.get(id)?.name_en||'-'):'-',tn:t=>t==='A'?m.team_a:m.team_b};
+}
+
+/* ---------- live sharing to overlay (free ntfy.sh, no account) ---------- */
+function snap(X){
+  const{m,cur,bt,balls,st,target,nm,tn}=X,bs=batStats(balls,bt,nm),last=balls[balls.length-1],bo=last?bowlStats(balls).find(b=>b.id===last.bowler_id):null;
+  return{a:m.team_a,b:m.team_b,col:cur.batting_team==='A'?m.team_a_color:m.team_b_color,bt:tn(cur.batting_team),ol:m.overs_limit,r:st.runs,w:st.wickets,lb:st.lb,tg:target,
+    p:[st.s,st.n].filter(Boolean).map(i=>{const s=bs.find(b=>b.id===i);return{n:nm(i),k:i===st.s?1:0,r:s?s.runs:0,b:s?s.balls:0}}),
+    bo:bo?{n:nm(bo.id),b:bo.b,md:bo.md,r:bo.r,w:bo.w}:null,lc:balls.slice(-6).map(chipTxt),done:m.status==='completed'?m.result:null};
+}
+function publish(){
+  clearTimeout(pt);const id=M&&M.id;
+  pt=setTimeout(()=>{const X=derive();if(!X||!id)return;fetch('https://ntfy.sh/vcs-'+id,{method:'POST',body:JSON.stringify(snap(X))}).catch(()=>{})},600);
+}
+function startOverlay(id){
+  const url='https://ntfy.sh/vcs-'+id,apply=t=>{try{OV=JSON.parse(t);drawOverlay()}catch(e){}};
+  fetch(url+'/json?poll=1&since=latest').then(r=>r.text()).then(t=>{const l=t.trim().split('\n').filter(Boolean).pop();if(l){const j=JSON.parse(l);if(j.message)apply(j.message)}}).catch(()=>{});
+  es=new EventSource(url+'/sse?since=latest');
+  es.onmessage=e=>{try{const j=JSON.parse(e.data);if(j.event==='message')apply(j.message)}catch(err){}};
+}
+
+/* ---------- actions ---------- */
+function finalize(X){
+  const all=M.balls.filter(b=>b.innings===X.cur.innings_number),s=replay(all,X.bt),ended=over(s,M.overs_limit,X.bt.length,X.target);
+  Object.assign(X.cur,{total_runs:s.runs,total_wickets:s.wickets,total_balls:s.lb,is_complete:ended});
+  if(ended&&X.cur.innings_number===1)M.innings.push({innings_number:2,batting_team:X.cur.bowling_team,bowling_team:X.cur.batting_team,total_runs:0,total_wickets:0,total_balls:0,is_complete:false});
+  else if(ended){
+    const f=M.innings[0],a=X.tn(f.batting_team),b=X.tn(X.cur.batting_team);
+    M.result=s.runs>f.total_runs?`${b} won by ${Math.max(1,X.bt.length-1)-s.wickets} wickets`:f.total_runs>s.runs?`${a} won by ${f.total_runs-s.runs} runs`:'Match tied';M.status='completed';
+  }else if(M.status==='completed'){M.status='live';M.result=null}
+  save();draw();
+}
+function record(runs,wicket){
+  const X=derive();if(!X||M.status==='completed')return;const last=X.balls[X.balls.length-1],mid=last&&X.st.lb%6!==0,bowler=bowlerSel||(mid?last.bowler_id:'');
+  if(!bowler)return alert('Pehle bowler select karo');
+  M.balls.push(buildBall(X.cur.innings_number,X.st,bowler,{runs,extra:mode,wicket}));mode=null;bowlerSel='';wk=null;finalize(X);
+}
+function undo(){
+  const X=derive();if(!X)return;const last=X.balls[X.balls.length-1];
+  if(!last){if(X.cur.innings_number===2){M.innings.pop();M.innings[0].is_complete=false;M.status='live';M.result=null;save();draw()}return}
+  M.balls.splice(M.balls.lastIndexOf(last),1);bowlerSel='';finalize(X);
+}
+const setMode=m=>{mode=mode===m?null:m;draw()};
+const setBowler=v=>{bowlerSel=v;draw()};
+function openWk(){wk={type:'bowled',out:derive().st.s,f:'',runs:0};draw()}
+function wkSet(k,v){wk[k]=v;if(k==='type'&&v!=='run out')wk.out=derive().st.s;draw()}
+function wkOk(){const need=wk.type==='caught'||wk.type==='stumped';if(need&&!wk.f)return alert('Fielder select karo');record(wk.type==='run out'?+wk.runs:0,{type:wk.type,outId:wk.out,fielderId:wk.f||null})}
+
+/* ---------- views ---------- */
+function draw(){if(view==='score')drawScore()}
+function drawScore(){
+  const X=derive();if(!M)return app.innerHTML='<div class="w card">Match nahi mila. <a href="#/">Home</a></div>';
+  const{m,cur,bt,bw,balls,st,target,nm,tn}=X,last=balls[balls.length-1],mid=last&&st.lb%6!==0,bowler=bowlerSel||(mid?last.bowler_id:'');
+  const col=cur.batting_team==='A'?m.team_a_color:m.team_b_color,done=m.status==='completed',bs=batStats(balls,bt,nm),bo=bowlStats(balls),sid=st.s,nid=st.n,left=Math.max(m.overs_limit*6-st.lb,0);
+  app.innerHTML=`<div class="w"><div style="display:flex;justify-content:space-between"><a href="#/">← Home</a><a href="javascript:copyUrl('${m.id}')">Overlay URL copy</a></div>
+  <div class="score" style="background:${col}"><div>${esc(tn(cur.batting_team))} · Innings ${cur.innings_number}</div><div class="n">${st.runs}/${st.wickets} <span style="font-size:22px;font-weight:400">(${ovs(st.lb)}/${m.overs_limit})</span></div>
+  <div>CRR ${rr(st.runs,st.lb).toFixed(2)}${target?` · RRR ${(left?(target-st.runs)*6/left:0).toFixed(2)} · Target ${target}`:''}</div></div>
+  ${done?`<div class="card y" style="text-align:center;font-weight:700">${esc(m.result)}</div>`:''}
+  <div style="margin:8px 0">${balls.slice(-6).map(b=>{const t=chipTxt(b);return`<span class="chip ${chipCls(t)}">${t}</span>`}).join('')}</div>
+  ${done?'':`<select onchange="setBowler(this.value)"><option value="">— Bowler select karo —</option>${bw.map(p=>`<option value="${p.id}" ${p.id===bowler?'selected':''} ${(!mid&&last&&p.id===last.bowler_id)?'disabled':''}>${esc(p.name_en)}</option>`).join('')}</select>
+  <div class="grid5">${[[null,'Normal'],['wide','Wide'],['noball','No-ball'],['bye','Bye'],['legbye','Leg-bye']].map(([k,l])=>`<button class="btn ${mode===k?'y':''}" style="font-size:12px;padding:10px 2px" onclick="setMode(${k?`'${k}'`:'null'})">${l}</button>`).join('')}</div>
+  <div class="grid3" style="margin:10px 0">${[0,1,2,3,4,6].map(r=>`<button class="btn run ${r===4?'b':r===6?'p':'g'}" onclick="record(${r})">${r}</button>`).join('')}</div>
+  <div class="grid2"><button class="btn big r" onclick="openWk()">WICKET</button><button class="btn big k" onclick="undo()">UNDO</button></div>`}
+  ${done?`<button class="btn big k" style="width:100%;margin-top:10px" onclick="undo()">UNDO last ball</button>`:''}
+  <div class="card"><b>Batting</b><table><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th></tr>${bs.filter(s=>s.batted||s.id===sid||s.id===nid).map(s=>`<tr><td><b>${esc(nm(s.id))}${s.id===sid?' *':''}</b><br><small>${s.out?esc(s.how):'not out'}</small></td><td><b>${s.runs}</b></td><td>${s.balls}</td><td>${s.f}</td><td>${s.s}</td></tr>`).join('')}</table></div>
+  <div class="card"><b>Bowling</b><table><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th></tr>${bo.map(s=>`<tr><td>${esc(nm(s.id))}</td><td>${ovs(s.b)}</td><td>${s.md}</td><td>${s.r}</td><td><b>${s.w}</b></td></tr>`).join('')}</table></div></div>
+  ${wk?`<div class="modal"><div><h3>Wicket</h3><div class="grid3">${['bowled','caught','lbw','run out','stumped','hit wicket'].map(t=>`<button class="btn ${wk.type===t?'r':''}" onclick="wkSet('type','${t}')">${t}</button>`).join('')}</div>
+  ${wk.type==='run out'?`<select onchange="wkSet('out',this.value)">${[sid,nid].map(i=>`<option value="${i}" ${i===wk.out?'selected':''}>${esc(nm(i))} out</option>`).join('')}</select><select onchange="wkSet('runs',this.value)">${[0,1,2,3].map(r=>`<option ${r==wk.runs?'selected':''}>${r}</option>`).join('')}</select>`:''}
+  ${['caught','stumped','run out'].includes(wk.type)?`<select onchange="wkSet('f',this.value)"><option value="">— ${wk.type==='stumped'?'Keeper':'Fielder'} —</option>${bw.map(p=>`<option value="${p.id}" ${p.id===wk.f?'selected':''}>${esc(p.name_en)}</option>`).join('')}</select>`:''}
+  <div class="grid2" style="margin-top:10px"><button class="btn big" onclick="wk=null;draw()">Cancel</button><button class="btn big r" onclick="wkOk()">Confirm</button></div></div></div>`:''}`;
+}
+function drawOverlay(){
+  document.body.style.setProperty('background','transparent','important');
+  const S=OV;if(!S)return app.innerHTML='<div class="ov"><div class="bar" style="padding:12px;text-align:center;font-size:22px">🏏 Scorer ka intezar…</div></div>';
+  const left=Math.max(S.ol*6-S.lb,0),status=S.done?S.done:S.tg?`Need ${Math.max(S.tg-S.r,0)} off ${left} balls`:`${S.bt} batting · ${S.ol} overs`;
+  app.innerHTML=`<div class="ov"><div class="bar"><div class="row">
+  <div style="background:${esc(S.col)};padding:8px 18px"><div style="font-size:20px;font-weight:700;text-transform:uppercase">${esc(S.bt)}</div><div class="bg">${S.r}/${S.w} <span style="font-size:24px;font-weight:400">${ovs(S.lb)}</span></div></div>
+  <div style="flex:1;padding:8px 14px;font-size:20px">${S.p.map(p=>`<div style="display:flex;justify-content:space-between"><b>${esc(p.n)}${p.k?' *':''}</b><b>${p.r} <small style="opacity:.7">(${p.b})</small></b></div>`).join('')}
+  ${S.bo?`<div style="display:flex;justify-content:space-between;font-size:17px;opacity:.9"><span>🥎 ${esc(S.bo.n)}</span><span>${ovs(S.bo.b)}-${S.bo.md}-${S.bo.r}-${S.bo.w}</span></div>`:''}</div>
+  <div style="padding:8px 14px;text-align:right"><div>CRR <b>${rr(S.r,S.lb).toFixed(2)}</b></div>${S.tg?`<div>RRR <b>${(left?(S.tg-S.r)*6/left:0).toFixed(2)}</b></div>`:''}<div>${S.lc.map(t=>`<span class="chip ${t==='W'?'r':''}" style="${t==='W'?'':'background:#fff;color:#0a4a20'};min-width:28px;height:28px">${esc(t)}</span>`).join('')}</div></div></div>
+  <div style="background:#0006;text-align:center;padding:4px;font-size:18px;font-weight:600">${esc(S.a)} vs ${esc(S.b)} · ${esc(status)}</div></div></div>`;
+}
+function drawHome(){
+  const all=getAll();
+  app.innerHTML=`<div class="w"><div class="hd"><h2 style="margin:0">🏏 Village Cricket</h2><div class="grid2" style="margin-top:12px"><a class="btn y big" href="#/new">+ New Match</a><a class="btn big" href="#/players">Players</a></div></div>
+  ${all.map(x=>`<div class="card"><b style="font-size:18px">${esc(x.team_a)} vs ${esc(x.team_b)}</b> <span class="chip ${x.status==='live'?'r':''}" style="float:right;height:24px">${x.status==='live'?'● LIVE':'Done'}</span>
+  ${x.innings.map(i=>`<div>${esc(i.batting_team==='A'?x.team_a:x.team_b)}: <b>${i.total_runs}/${i.total_wickets}</b> (${ovs(i.total_balls)})</div>`).join('')}
+  ${x.result?`<div style="color:#0a6b2f;font-weight:700">${esc(x.result)}</div>`:''}
+  <div class="grid3" style="margin-top:8px"><a class="btn g" style="font-size:14px" href="#/score/${x.id}">${x.status==='live'?'Score':'Card'}</a><button class="btn" style="font-size:14px" onclick="copyUrl('${x.id}',this)">Copy Overlay URL</button><button class="btn" style="font-size:14px" onclick="delMatch('${x.id}')">Delete</button></div></div>`).join('')||'<p style="text-align:center">Abhi koi match nahi. “New Match” dabao.</p>'}</div>`;
+}
+function copyUrl(id,el){const u=location.href.split('#')[0]+'#/overlay/'+id;(navigator.clipboard?navigator.clipboard.writeText(u):Promise.reject()).catch(()=>prompt('Copy karo:',u));if(el)el.textContent='Copied ✓'}
+function delMatch(id){if(confirm('Ye match delete karna hai?')){localStorage.setItem(KEY,JSON.stringify(getAll().filter(x=>x.id!==id)));drawHome()}}
+function drawNew(){
+  app.innerHTML=`<div class="w"><a href="#/">← Home</a><h2>New Match</h2>
+  <div style="display:grid;grid-template-columns:1fr 56px;gap:8px"><input id="a" placeholder="Team A name"><input id="ca" type="color" value="#01411C"></div>
+  <div style="display:grid;grid-template-columns:1fr 56px;gap:8px"><input id="b" placeholder="Team B name"><input id="cb" type="color" value="#f5c518"></div>
+  Overs <input id="ov" type="number" value="10" min="1">
+  <div class="grid2"><label>Toss jeeta<select id="toss"><option value="A">Team A</option><option value="B">Team B</option></select></label><label>Pehle batting<select id="first"><option value="A">Team A</option><option value="B">Team B</option></select></label></div>
+  <small>Players: har line mein 1 player, batting order mein. Format: <b>English | اردو | photo link</b> (Urdu/photo optional)</small>
+  <textarea id="pa" rows="8" placeholder="Ali Khan | علی خان&#10;Bilal | بلال"></textarea><textarea id="pb" rows="8" placeholder="Team B players..."></textarea>
+  <div id="err" style="color:#b00"></div><button class="btn g big" style="width:100%" onclick="createMatch()">Start Match</button></div>`;
+}
+const parse=(t,team)=>t.split('\n').map(l=>l.trim()).filter(Boolean).map((l,i)=>{const[en,ur,ph]=l.split('|').map(x=>x.trim());return{id:uid(),team,name_en:en,name_ur:ur||null,photo_url:ph||null,batting_order:i}});
+function createMatch(){
+  const A=parse($('#pa').value,'A'),B=parse($('#pb').value,'B'),a=$('#a').value.trim(),b=$('#b').value.trim(),err=t=>$('#err').textContent=t;
+  if(!a||!b)return err('Dono team ke naam likho');if(A.length<2||B.length<2)return err('Har team mein kam az kam 2 players chahiye');
+  const first=$('#first').value;
+  M={id:uid(),team_a:a,team_b:b,team_a_color:$('#ca').value,team_b_color:$('#cb').value,overs_limit:Math.max(1,+$('#ov').value||10),toss_winner:$('#toss').value,batting_first:first,status:'live',result:null,
+    players:[...A,...B],balls:[],innings:[{innings_number:1,batting_team:first,bowling_team:first==='A'?'B':'A',total_runs:0,total_wickets:0,total_balls:0,is_complete:false}]};
+  save();location.hash='#/score/'+M.id;
+}
+function drawPlayers(){
+  const agg=new Map(),key=x=>x.name_en.trim().toLowerCase();
+  for(const m of getAll()){
+    const by=new Map(m.players.map(p=>[p.id,p]));
+    for(const p of m.players){const k=key(p);if(!agg.has(k))agg.set(k,{...p,tm:p.team==='A'?m.team_a:m.team_b,runs:0,w:0,ms:new Set()});const a=agg.get(k);a.ms.add(m.id);a.photo_url=a.photo_url||p.photo_url;a.name_ur=a.name_ur||p.name_ur}
+    for(const x of m.balls){const bt=by.get(x.batsman_id);if(bt)agg.get(key(bt)).runs+=x.runs;const bw=by.get(x.bowler_id);if(bw&&x.is_wicket&&x.wicket_type!=='run out')agg.get(key(bw)).w++}
+  }
+  app.innerHTML=`<div class="w"><a href="#/">← Home</a><h2>Players</h2>${[...agg.values()].sort((a,b)=>b.runs-a.runs).map(a=>`<div class="card" style="display:flex;gap:12px;align-items:center">
+  ${a.photo_url?`<img src="${esc(a.photo_url)}" style="width:64px;height:64px;border-radius:50%;object-fit:cover">`:`<div class="chip g" style="width:64px;height:64px;border-radius:50%;font-size:26px">${esc(a.name_en[0])}</div>`}
+  <div style="flex:1"><b style="font-size:18px">${esc(a.name_en)}</b><div class="ur" style="font-size:20px">${esc(a.name_ur||'')}</div><small>${esc(a.tm)}</small></div>
+  <div style="text-align:right"><b>${a.runs}</b> runs<br><b>${a.w}</b> wkts<br>${a.ms.size} mat</div></div>`).join('')||'<p>Abhi koi player nahi.</p>'}</div>`;
+}
+
+/* ---------- router ---------- */
+function route(){
+  if(es){es.close();es=null}OV=null;document.body.style.background='';mode=null;bowlerSel='';wk=null;M=null;
+  const[,page,id]=location.hash.slice(1).split('/');
+  if(page==='score'&&id){view='score';M=getAll().find(x=>x.id===id)||null;drawScore()}
+  else if(page==='overlay'&&id){view='overlay';drawOverlay();startOverlay(id)}
+  else if(page==='new'){view='new';drawNew()}else if(page==='players'){view='players';drawPlayers()}else{view='home';drawHome()}
+}
+addEventListener('hashchange',route);route();
+</script></body></html>
